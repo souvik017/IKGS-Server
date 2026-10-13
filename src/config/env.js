@@ -34,7 +34,7 @@ const config = {
     maxAgeMs: toInt(process.env.COOKIE_MAX_AGE_MS, 30 * 24 * 60 * 60 * 1000),
   },
 
-  corsOrigins: (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:3000')
+  corsOrigins: (process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:3000,https://ikgssol2.netlify.app/')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),

@@ -4,6 +4,8 @@ const lineItemSchema = new mongoose.Schema(
   {
     item: { type: String, required: [true, 'Line item name is required'], trim: true },
     description: { type: String, trim: true },
+    hsnSac: { type: String, trim: true, default: '998512' },
+    unit: { type: String, trim: true, default: 'NOS' },
     quantity: { type: Number, required: true, min: [0, 'Quantity cannot be negative'], default: 1 },
     unitPrice: { type: Number, required: true, min: [0, 'Unit price cannot be negative'], default: 0 },
     discount: { type: Number, min: [0, 'Discount cannot be negative'], default: 0 },
@@ -26,6 +28,10 @@ const invoiceSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Customer',
       required: [true, 'Invoice must reference a customer'],
+    },
+    shipTo: {
+      name: { type: String, trim: true },
+      address: { type: String, trim: true },
     },
     appointment: {
       type: mongoose.Schema.Types.ObjectId,
@@ -52,6 +58,7 @@ const invoiceSchema = new mongoose.Schema(
     discount: { type: Number, default: 0, min: 0 },
     taxRate: { type: Number, default: 0, min: 0 },
     tax: { type: Number, default: 0, min: 0 },
+    roundOff: { type: Number, default: 0 },
     total: { type: Number, default: 0, min: 0 },
     amountPaid: { type: Number, default: 0, min: 0 },
     balanceDue: { type: Number, default: 0, min: 0 },
@@ -65,6 +72,8 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       enum: ['cash', 'upi', 'bank-transfer', 'cheque', 'card', 'other'],
     },
+    transferAmount: { type: Number, min: 0, default: 0 },
+    transferReference: { type: String, trim: true, maxlength: 250 },
     dueDate: { type: Date },
     notes: { type: String, trim: true },
     terms: { type: String, trim: true },

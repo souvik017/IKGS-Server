@@ -1,10 +1,13 @@
 const express = require('express');
 const controller = require('../controllers/authController');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, protectAnyAccount, authorize } = require('../middleware/auth');
 const { loginLimiter } = require('../middleware/rateLimit');
 const { validate, rules } = require('../middleware/validate');
 
 const router = express.Router();
+
+router.post('/password/forgot', loginLimiter, validate({ email: [rules.required('Email'), rules.email()] }), controller.requestPasswordReset);
+router.post('/password/reset', loginLimiter, validate({ token: [rules.required('Reset token')], password: [rules.required('New password'), rules.minLength(8, 'New password')] }), controller.resetPassword);
 
 router.post(
   '/login',
@@ -17,11 +20,11 @@ router.post(
 );
 
 router.post('/logout', controller.logout);
-router.post('/refresh', protect, controller.refresh);
-router.get('/me', protect, controller.getMe);
+router.post('/refresh', protectAnyAccount, controller.refresh);
+router.get('/me', protectAnyAccount, controller.getMe);
 router.put(
   '/password',
-  protect,
+  protectAnyAccount,
   validate({
     currentPassword: [rules.required('Current password')],
     newPassword: [rules.required('New password'), rules.minLength(8, 'New password')],

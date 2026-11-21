@@ -58,8 +58,7 @@ const config = {
   upload: {
     maxFileSize: toInt(process.env.MAX_FILE_SIZE, 5 * 1024 * 1024),
     allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
-    // When Cloudinary is not configured, fall back to local disk storage.
-    provider: process.env.UPLOAD_PROVIDER || (process.env.CLOUDINARY_CLOUD_NAME ? 'cloudinary' : 'local'),
+    provider: 'cloudinary',
     localDir: process.env.UPLOAD_DIR || 'uploads',
   },
 
@@ -70,6 +69,7 @@ const config = {
     pass: process.env.SMTP_PASS || '',
     from: process.env.SMTP_FROM || 'no-reply@ikgssolution.com',
   },
+  siteUrl: process.env.SITE_URL || 'http://localhost:5173',
 
   seed: {
     adminName: process.env.ADMIN_NAME || 'IKGS Administrator',

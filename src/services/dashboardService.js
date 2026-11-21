@@ -5,6 +5,7 @@ const Customer = require('../models/Customer');
 const Quotation = require('../models/Quotation');
 const Invoice = require('../models/Invoice');
 const InventoryItem = require('../models/InventoryItem');
+const Employee = require('../models/Employee');
 
 function startOfToday() {
   const d = new Date();
@@ -24,22 +25,28 @@ function endOfToday() {
 async function getSummary() {
   const todayStart = startOfToday();
   const todayEnd = endOfToday();
+  const monthStart = new Date(todayEnd.getFullYear(), todayEnd.getMonth(), 1);
 
   const [
     totalEnquiries,
     newEnquiries,
     pendingBookings,
+    pendingFreeInspections,
     todaysAppointments,
     upcomingAppointments,
     totalCustomers,
     pendingQuotations,
     unpaidInvoices,
     outstandingAgg,
+    revenueAgg,
+    monthRevenueAgg,
     inventoryItems,
+    employees,
   ] = await Promise.all([
     Enquiry.countDocuments(),
     Enquiry.countDocuments({ status: 'new' }),
     Booking.countDocuments({ status: { $in: ['new', 'pending'] } }),
+    Booking.countDocuments({ source: 'website', status: { $in: ['new', 'pending'] } }),
     Appointment.countDocuments({
       date: { $gte: todayStart, $lte: todayEnd },
       status: { $nin: ['cancelled', 'completed'] },
@@ -55,7 +62,10 @@ async function getSummary() {
       { $match: { paymentStatus: { $in: ['unpaid', 'partially-paid'] } } },
       { $group: { _id: null, amount: { $sum: '$balanceDue' } } },
     ]),
+    Invoice.aggregate([{ $group: { _id: null, amount: { $sum: '$amountPaid' } } }]),
+    Invoice.aggregate([{ $match: { createdAt: { $gte: monthStart } } }, { $group: { _id: null, amount: { $sum: '$amountPaid' } } }]),
     InventoryItem.find({ active: true }, 'quantity lowStockThreshold'),
+    Employee.find({ active: true, dateOfBirth: { $ne: null } }, 'name dateOfBirth'),
   ]);
 
   const lowStock = inventoryItems.filter(
@@ -63,18 +73,26 @@ async function getSummary() {
   ).length;
 
   const outstandingAmount = outstandingAgg[0]?.amount || 0;
+  const revenueAllTime = revenueAgg[0]?.amount || 0;
+  const revenueThisMonth = monthRevenueAgg[0]?.amount || 0;
+  const today = new Date();
+  const birthdayEmployees = employees.filter((e) => e.dateOfBirth && new Date(e.dateOfBirth).getUTCMonth() === today.getUTCMonth() && new Date(e.dateOfBirth).getUTCDate() === today.getUTCDate()).map((e) => ({ id: e._id, name: e.name }));
 
   return {
     totalEnquiries,
     newEnquiries,
     pendingBookings,
+    pendingFreeInspections,
     todaysAppointments,
     upcomingAppointments,
     totalCustomers,
     pendingQuotations,
     unpaidInvoices,
     outstandingAmount,
+    revenueAllTime,
+    revenueThisMonth,
     lowStockItems: lowStock,
+    birthdayEmployees,
   };
 }
 

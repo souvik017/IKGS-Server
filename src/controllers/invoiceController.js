@@ -38,7 +38,7 @@ exports.list = asyncHandler(async (req, res) => {
 // @access  Private
 exports.getById = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findById(req.params.id)
-    .populate('customer', 'name phone email address')
+    .populate('customer', 'name phone email address gstin')
     .populate('appointment', 'appointmentId date time address');
   if (!invoice) throw ApiError.notFound('Invoice not found');
   return sendSuccess(res, { invoice });
@@ -48,14 +48,14 @@ exports.getById = asyncHandler(async (req, res) => {
  * Build line items for an appointment-based invoice when none are supplied.
  */
 async function itemsFromAppointment(appointment) {
-  const populated = await appointment.populate('service', 'title startingPrice');
+  const populated = await appointment.populate('service', 'title');
   const service = populated.service;
   return [
     {
       item: service?.title || `Service charge (${appointment.appointmentId})`,
       description: appointment.jobNotes || undefined,
       quantity: 1,
-      unitPrice: service?.startingPrice || 0,
+      unitPrice: 0,
     },
   ];
 }
@@ -65,7 +65,7 @@ async function itemsFromAppointment(appointment) {
  * @param {'appointment'|'general'} mode
  */
 async function createInvoice(req, mode) {
-  const { customer, items, appointment, billingPeriod, discount, taxRate, dueDate, notes, terms } = req.body;
+  const { customer, items, appointment, billingPeriod, discount, taxRate, dueDate, notes, terms, shipTo } = req.body;
 
   let resolvedCustomer = customer;
   let appointmentDoc = null;
@@ -74,10 +74,15 @@ async function createInvoice(req, mode) {
     if (!appointment) throw ApiError.badRequest('An appointment is required for an appointment invoice');
     appointmentDoc = await Appointment.findById(appointment);
     if (!appointmentDoc) throw ApiError.badRequest('Appointment not found');
+    if (!['completion-requested', 'completed'].includes(appointmentDoc.status)) throw ApiError.badRequest('Appointment invoices can be created after the employee submits a closure request with site photos');
+    const AppointmentClosure = require('../models/AppointmentClosure');
+    const closure = await AppointmentClosure.findOne({ appointment: appointmentDoc._id, status: { $in: ['pending-review', 'approved'] } });
+    if (!closure || !closure.images.length) throw ApiError.badRequest('A site photo closure request is required before invoicing');
     resolvedCustomer = resolvedCustomer || appointmentDoc.customer;
   }
 
   if (!resolvedCustomer) throw ApiError.badRequest('Customer is required');
+  if (appointmentDoc && await Invoice.exists({ appointment: appointmentDoc._id })) throw ApiError.conflict('An invoice already exists for this appointment');
   const customerDoc = await Customer.findById(resolvedCustomer);
   if (!customerDoc) throw ApiError.badRequest('Customer not found');
 
@@ -93,6 +98,7 @@ async function createInvoice(req, mode) {
   const invoice = await Invoice.create({
     invoiceNumber: await nextInvoiceNumber(),
     customer: resolvedCustomer,
+    shipTo: shipTo ? { name: shipTo.name || '', address: shipTo.address || '' } : undefined,
     appointment: appointmentDoc ? appointmentDoc._id : undefined,
     invoiceType: mode,
     billingPeriod: mode === 'general' ? billingPeriod : undefined,
@@ -102,6 +108,7 @@ async function createInvoice(req, mode) {
     discount: totals.discount,
     taxRate: totals.taxRate,
     tax: totals.tax,
+    roundOff: totals.roundOff,
     total: totals.total,
     amountPaid: 0,
     balanceDue: totals.total,
@@ -150,14 +157,23 @@ exports.update = asyncHandler(async (req, res) => {
     invoice.discount = totals.discount;
     invoice.taxRate = totals.taxRate;
     invoice.tax = totals.tax;
+    invoice.roundOff = totals.roundOff;
     invoice.total = totals.total;
     invoice.applyPayment(invoice.amountPaid);
+    invoice.transferAmount = Math.min(Number(invoice.transferAmount) || 0, invoice.amountPaid);
   }
 
-  ['billingPeriod', 'notes', 'terms', 'paymentMethod'].forEach((field) => {
+  ['billingPeriod', 'notes', 'terms', 'paymentMethod', 'shipTo', 'transferReference'].forEach((field) => {
     if (req.body[field] !== undefined) invoice[field] = req.body[field];
   });
-  if (req.body.dueDate) invoice.dueDate = new Date(req.body.dueDate);
+  if (req.body.transferAmount !== undefined) {
+    const amount = Number(req.body.transferAmount);
+    if (!Number.isFinite(amount) || amount < 0) throw ApiError.badRequest('Transfer amount must be a non-negative number');
+    invoice.transferAmount = amount;
+  }
+  if (Object.prototype.hasOwnProperty.call(req.body, 'dueDate')) {
+    invoice.dueDate = req.body.dueDate ? new Date(req.body.dueDate) : undefined;
+  }
 
   await invoice.save();
   return sendSuccess(res, { invoice });
@@ -170,13 +186,23 @@ exports.updatePayment = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findById(req.params.id);
   if (!invoice) throw ApiError.notFound('Invoice not found');
 
-  const { amountPaid, paymentMethod } = req.body;
-  if (amountPaid === undefined && !paymentMethod) {
+  const { amountPaid, paymentMethod, transferAmount, transferReference } = req.body;
+  if (amountPaid === undefined && !paymentMethod && transferAmount === undefined && transferReference === undefined) {
     throw ApiError.badRequest('Provide amountPaid and/or paymentMethod');
   }
 
   if (amountPaid !== undefined) invoice.amountPaid = Number(amountPaid);
   if (paymentMethod) invoice.paymentMethod = paymentMethod;
+  if (paymentMethod === 'bank-transfer' && transferAmount === undefined && amountPaid !== undefined) {
+    invoice.transferAmount = Math.min(Number(amountPaid) || 0, Number(invoice.total) || 0);
+  }
+  if (transferAmount !== undefined) {
+    const amount = Number(transferAmount);
+    const paidAmount = Math.min(amountPaid !== undefined ? Number(amountPaid) : Number(invoice.amountPaid), Number(invoice.total) || 0);
+    if (!Number.isFinite(amount) || amount < 0 || amount > paidAmount) throw ApiError.badRequest('Transfer amount must be non-negative and cannot exceed the amount paid');
+    invoice.transferAmount = amount;
+  }
+  if (transferReference !== undefined) invoice.transferReference = String(transferReference).trim();
 
   invoice.applyPayment(invoice.amountPaid);
   await invoice.save();
@@ -188,8 +214,8 @@ exports.updatePayment = asyncHandler(async (req, res) => {
 // @access  Private
 exports.downloadPdf = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findById(req.params.id)
-    .populate('customer', 'name phone email address')
-    .populate('appointment', 'appointmentId');
+    .populate('customer', 'name phone email address gstin')
+    .populate('appointment', 'appointmentId address');
   if (!invoice) throw ApiError.notFound('Invoice not found');
 
   const settings = await getSettings();

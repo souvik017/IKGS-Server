@@ -15,7 +15,7 @@ const config = require('../config/env');
  *    mongod deployments (no replica set) we fall back to the guarded update,
  *    which is still safe because the guard is evaluated atomically by MongoDB.
  */
-async function applyMovement({ itemId, type, quantity, reference, notes, performedBy }) {
+async function applyMovement({ itemId, type, quantity, reference, notes, performedBy, appointment, appointmentId, customerName }) {
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0) {
     throw ApiError.badRequest('Quantity must be a positive number');
@@ -74,6 +74,9 @@ async function applyMovement({ itemId, type, quantity, reference, notes, perform
           reference: reference || '',
           notes: notes || '',
           performedBy,
+          appointment,
+          appointmentId,
+          customerName,
         },
       ],
       session ? { session } : {}

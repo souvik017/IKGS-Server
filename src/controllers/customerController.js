@@ -54,7 +54,7 @@ exports.getById = asyncHandler(async (req, res) => {
 // @route   POST /api/customers
 // @access  Private
 exports.create = asyncHandler(async (req, res) => {
-  const { name, phone, email, address, notes, tags } = req.body;
+  const { name, phone, email, address, notes, tags, gstin } = req.body;
   if (!name) throw ApiError.badRequest('Customer name is required');
 
   if (phone || email) {
@@ -69,6 +69,7 @@ exports.create = asyncHandler(async (req, res) => {
     name,
     phone,
     email: email ? String(email).toLowerCase() : undefined,
+    gstin,
     address,
     notes,
     tags,
@@ -81,7 +82,7 @@ exports.create = asyncHandler(async (req, res) => {
 // @route   PUT /api/customers/:id
 // @access  Private
 exports.update = asyncHandler(async (req, res) => {
-  const allowed = ['name', 'phone', 'email', 'address', 'notes', 'tags', 'status'];
+  const allowed = ['name', 'phone', 'email', 'address', 'notes', 'tags', 'status', 'gstin'];
   const updates = {};
   allowed.forEach((field) => {
     if (req.body[field] !== undefined) updates[field] = req.body[field];

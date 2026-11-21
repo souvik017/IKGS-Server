@@ -10,6 +10,7 @@ const config = require('./config/env');
 const routes = require('./routes');
 const { globalLimiter } = require('./middleware/rateLimit');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const { cloudinaryEnabled } = require('./config/cloudinary');
 
 const app = express();
 
@@ -43,7 +44,7 @@ if (!config.isProduction) {
   app.use(morgan('dev'));
 }
 
-// Serve locally stored uploads when not using Cloudinary.
+// Serve legacy local media paths created before Cloudinary became mandatory.
 app.use('/uploads', express.static(path.join(process.cwd(), config.upload.localDir)));
 
 app.use('/api', globalLimiter, routes);
@@ -53,7 +54,7 @@ app.get('/health', (req, res) => {
     success: true,
     status: 'ok',
     env: config.env,
-    storage: config.upload.provider,
+    storage: cloudinaryEnabled ? 'cloudinary' : 'cloudinary-not-configured',
     transactions: config.mongoTransactions,
     timestamp: new Date().toISOString(),
   });

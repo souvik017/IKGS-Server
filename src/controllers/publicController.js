@@ -8,6 +8,7 @@ const { sendSuccess } = require('../utils/apiResponse');
 const { getSettings, toPublicSettings } = require('../services/settingsService');
 const { createBooking } = require('./bookingController');
 const { enquiryId: newEnquiryId } = require('../utils/ids');
+const { removeLegacyServicePrices } = require('../services/serviceCatalogService');
 
 // @desc    Public site settings
 // @route   GET /api/public/settings
@@ -21,8 +22,9 @@ exports.getSettings = asyncHandler(async (req, res) => {
 // @route   GET /api/public/services
 // @access  Public
 exports.listServices = asyncHandler(async (req, res) => {
+  await removeLegacyServicePrices();
   const services = await Service.find({ active: true })
-    .select('title slug shortDescription description image icon startingPrice featured displayOrder seoTitle seoDescription')
+    .select('title slug shortDescription description image icon featured displayOrder seoTitle seoDescription')
     .sort({ displayOrder: 1, title: 1 });
   return sendSuccess(res, { services });
 });
@@ -31,6 +33,7 @@ exports.listServices = asyncHandler(async (req, res) => {
 // @route   GET /api/public/services/:slug
 // @access  Public
 exports.getServiceBySlug = asyncHandler(async (req, res) => {
+  await removeLegacyServicePrices();
   const service = await Service.findOne({ slug: req.params.slug, active: true }).select(
     '-seoKeywords -__v'
   );

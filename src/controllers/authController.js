@@ -1,8 +1,45 @@
 const Admin = require('../models/Admin');
+const Employee = require('../models/Employee');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { sendSuccess } = require('../utils/apiResponse');
 const { issueSession, clearSession, signToken } = require('../utils/jwt');
+const crypto = require('crypto');
+const config = require('../config/env');
+const { sendSystemMail } = require('../services/mailService');
+
+exports.requestPasswordReset = asyncHandler(async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const account = await Admin.findOne({ email, active: true }) || await Employee.findOne({ email, active: true });
+  // Always return the same response to avoid revealing whether an account exists.
+  if (account) {
+    const token = crypto.randomBytes(32).toString('hex');
+    account.passwordResetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    account.passwordResetExpires = new Date(Date.now() + 30 * 60 * 1000);
+    await account.save({ validateBeforeSave: false });
+    const link = `${config.siteUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+    await sendSystemMail({ to: account.email, subject: 'Reset your IKGS account password', text: `Use this link within 30 minutes to reset your password: ${link}`, html: `<p>Use the link below within 30 minutes to reset your IKGS account password.</p><p><a href="${link}">Reset password</a></p>` });
+  }
+  return sendSuccess(res, { message: 'If an active account matches that email, password reset instructions have been sent.' });
+});
+
+exports.resetPassword = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password || String(password).length < 8) throw ApiError.badRequest('A valid reset token and password of at least 8 characters are required');
+  const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
+  let account = await Admin.findOne({ passwordResetTokenHash: tokenHash, passwordResetExpires: { $gt: new Date() } }).select('+passwordHash +passwordResetTokenHash +passwordResetExpires');
+  let isEmployee = false;
+  if (!account) {
+    account = await Employee.findOne({ passwordResetTokenHash: tokenHash, passwordResetExpires: { $gt: new Date() } }).select('+passwordHash +passwordResetTokenHash +passwordResetExpires');
+    isEmployee = Boolean(account);
+  }
+  if (!account || !account.active) throw ApiError.badRequest('This password reset link is invalid or expired. Request a new one.');
+  account.passwordHash = await require('bcryptjs').hash(String(password), 12);
+  account.passwordResetTokenHash = undefined;
+  account.passwordResetExpires = undefined;
+  await account.save();
+  return sendSuccess(res, { message: `Password reset successfully. You can now sign in${isEmployee ? ' to the employee portal' : ''}.` });
+});
 
 // @desc    Authenticate an admin
 // @route   POST /api/auth/login
@@ -11,19 +48,21 @@ exports.login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) throw ApiError.badRequest('Email and password are required');
 
-  const admin = await Admin.findOne({ email: String(email).toLowerCase() }).select('+passwordHash');
-  if (!admin) throw ApiError.unauthorized('Invalid email or password');
-  if (!admin.active) throw ApiError.forbidden('This account has been deactivated');
+  let admin = await Admin.findOne({ email: String(email).toLowerCase() }).select('+passwordHash');
+  let employee = null;
+  if (!admin) employee = await Employee.findOne({ email: String(email).toLowerCase() }).select('+passwordHash');
+  const account = admin || employee;
+  if (!account || !account.passwordHash) throw ApiError.unauthorized('Invalid email or password');
+  if (!account.active) throw ApiError.forbidden('This account has been deactivated');
 
-  const matches = await admin.comparePassword(password);
+  const matches = await require('bcryptjs').compare(password, account.passwordHash);
   if (!matches) throw ApiError.unauthorized('Invalid email or password');
 
-  admin.lastLogin = new Date();
-  await admin.save({ validateBeforeSave: false });
+  if (admin) { admin.lastLogin = new Date(); await admin.save({ validateBeforeSave: false }); }
 
-  const { token, csrfToken } = issueSession(res, admin);
+  const { token, csrfToken } = issueSession(res, account, employee ? 'employee' : 'admin');
 
-  return sendSuccess(res, { admin: admin.toSafeObject(), token, csrfToken });
+  return sendSuccess(res, { admin: admin ? admin.toSafeObject() : { ...employee.toObject(), passwordHash: undefined, accountType: 'employee' }, token, csrfToken });
 });
 
 // @desc    Clear the admin session
@@ -37,14 +76,16 @@ exports.logout = asyncHandler(async (req, res) => {
 // @desc    Current admin profile
 // @route   GET /api/auth/me
 // @access  Private
-exports.getMe = asyncHandler(async (req, res) => sendSuccess(res, { admin: req.admin.toSafeObject() }));
+exports.getMe = asyncHandler(async (req, res) => sendSuccess(res, { admin: req.admin ? req.admin.toSafeObject() : { ...req.employee.toObject(), passwordHash: undefined, accountType: 'employee' } }));
 
 // @desc    Refresh the session cookie expiry
 // @route   POST /api/auth/refresh
 // @access  Private
 exports.refresh = asyncHandler(async (req, res) => {
-  const { token, csrfToken } = issueSession(res, req.admin);
-  return sendSuccess(res, { admin: req.admin.toSafeObject(), token, csrfToken });
+  const account = req.admin || req.employee;
+  const type = req.employee ? 'employee' : 'admin';
+  const { token, csrfToken } = issueSession(res, account, type);
+  return sendSuccess(res, { admin: req.admin ? req.admin.toSafeObject() : { ...req.employee.toObject(), passwordHash: undefined, accountType: type }, token, csrfToken });
 });
 
 // @desc    Change own password
@@ -59,12 +100,14 @@ exports.changePassword = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('New password must be at least 8 characters');
   }
 
-  const admin = await Admin.findById(req.admin._id).select('+passwordHash');
-  const matches = await admin.comparePassword(currentPassword);
+  const account = req.employee
+    ? await Employee.findById(req.employee._id).select('+passwordHash')
+    : await Admin.findById(req.admin._id).select('+passwordHash');
+  const matches = await require('bcryptjs').compare(currentPassword, account.passwordHash);
   if (!matches) throw ApiError.badRequest('Current password is incorrect');
 
-  admin.passwordHash = await Admin.hashPassword(newPassword);
-  await admin.save();
+  account.passwordHash = await require('bcryptjs').hash(newPassword, 12);
+  await account.save();
   return sendSuccess(res, { message: 'Password updated successfully' });
 });
 

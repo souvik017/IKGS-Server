@@ -16,6 +16,11 @@ const appointmentClosureSchema = new mongoose.Schema(
       },
       default: [],
     },
+    status: { type: String, enum: ['pending-review', 'approved', 'rejected'], default: 'pending-review', index: true },
+    submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    reviewedAt: { type: Date },
+    reviewNotes: { type: String, trim: true, maxlength: 1000 },
     rating: {
       type: Number,
       min: [1, 'Rating must be at least 1'],

@@ -41,7 +41,7 @@ exports.getById = asyncHandler(async (req, res) => {
 // @route   POST /api/quotations
 // @access  Private
 exports.create = asyncHandler(async (req, res) => {
-  const { customer, validUntil, terms, notes, status } = req.body;
+  const { customer, validUntil, terms, notes, status, recipientName, recipientOrganization, recipientAddress, subject, introduction, scopeItems, treatmentAreas, methodology, serviceFrequency, commitment } = req.body;
   if (!customer) throw ApiError.badRequest('Customer is required');
   const customerDoc = await Customer.findById(customer);
   if (!customerDoc) throw ApiError.badRequest('Customer not found');
@@ -53,12 +53,23 @@ exports.create = asyncHandler(async (req, res) => {
   const quotation = await Quotation.create({
     quotationNumber: await nextQuotationNumber(),
     customer,
+    recipientName,
+    recipientOrganization,
+    recipientAddress,
+    subject,
+    introduction,
+    scopeItems: Array.isArray(scopeItems) ? scopeItems.map(String).filter((s) => s.trim()) : [],
+    treatmentAreas: Array.isArray(treatmentAreas) ? treatmentAreas.map(String).filter((s) => s.trim()) : [],
+    methodology: Array.isArray(methodology) ? methodology.map(String).filter((s) => s.trim()) : [],
+    serviceFrequency,
+    commitment,
     items,
     subtotal: totals.subtotal,
     lineDiscountTotal: totals.lineDiscountTotal,
     discount: totals.discount,
     taxRate: totals.taxRate,
     tax: totals.tax,
+    roundOff: totals.roundOff,
     total: totals.total,
     validUntil: validUntil ? new Date(validUntil) : new Date(Date.now() + validityDays * 86400000),
     terms: terms || settings.defaultTerms,
@@ -89,10 +100,11 @@ exports.update = asyncHandler(async (req, res) => {
     quotation.discount = totals.discount;
     quotation.taxRate = totals.taxRate;
     quotation.tax = totals.tax;
+    quotation.roundOff = totals.roundOff;
     quotation.total = totals.total;
   }
 
-  ['validUntil', 'terms', 'notes', 'status'].forEach((field) => {
+  ['validUntil', 'terms', 'notes', 'status', 'recipientName', 'recipientOrganization', 'recipientAddress', 'subject', 'introduction', 'scopeItems', 'treatmentAreas', 'methodology', 'serviceFrequency', 'commitment'].forEach((field) => {
     if (req.body[field] !== undefined) quotation[field] = req.body[field];
   });
   if (req.body.validUntil) quotation.validUntil = new Date(req.body.validUntil);

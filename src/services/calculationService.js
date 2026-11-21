@@ -26,6 +26,8 @@ function normaliseItems(items) {
     return {
       item: String(line.item).trim(),
       description: line.description ? String(line.description).trim() : undefined,
+      hsnSac: line.hsnSac ? String(line.hsnSac).trim() : '998512',
+      unit: line.unit ? String(line.unit).trim() : 'NOS',
       quantity,
       unitPrice,
       discount: line.discount ? Number(line.discount) : 0,

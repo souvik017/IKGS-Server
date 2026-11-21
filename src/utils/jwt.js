@@ -2,8 +2,8 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const config = require('../config/env');
 
-const signToken = (admin) =>
-  jwt.sign({ id: admin._id.toString(), role: admin.role }, config.jwt.secret, {
+const signToken = (admin, type = 'admin') =>
+  jwt.sign({ id: admin._id.toString(), role: admin.role, type }, config.jwt.secret, {
     expiresIn: config.jwt.expire,
   });
 
@@ -21,8 +21,8 @@ const cookieOptions = () => ({
  * Issue the auth JWT as an httpOnly cookie plus a readable CSRF token cookie
  * (double-submit pattern). The raw token is also returned for non-cookie clients.
  */
-function issueSession(res, admin) {
-  const token = signToken(admin);
+function issueSession(res, admin, type = 'admin') {
+  const token = signToken(admin, type);
   const csrfToken = crypto.randomBytes(24).toString('hex');
 
   res.cookie(config.jwt.cookieName, token, cookieOptions());

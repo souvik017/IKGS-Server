@@ -35,6 +35,8 @@ exports.getItem = asyncHandler(async (req, res) => {
   const item = await InventoryItem.findById(req.params.id);
   if (!item) throw ApiError.notFound('Inventory item not found');
   const transactions = await InventoryTransaction.find({ item: item._id })
+    .populate('appointment', 'appointmentId')
+    .populate('performedBy', 'name')
     .sort({ createdAt: -1 })
     .limit(20);
   return sendSuccess(res, { item, transactions });
@@ -108,7 +110,7 @@ exports.listMovements = asyncHandler(async (req, res) => {
   if (req.query.type) query.type = req.query.type;
 
   const [movements, total] = await Promise.all([
-    InventoryTransaction.find(query).populate('item', 'itemName unit').sort({ createdAt: -1 }).skip(skip).limit(limit),
+    InventoryTransaction.find(query).populate('item', 'itemName unit').populate('appointment', 'appointmentId date').populate('performedBy', 'name').sort({ createdAt: -1 }).skip(skip).limit(limit),
     InventoryTransaction.countDocuments(query),
   ]);
   return sendList(res, movements, { page, limit, total });

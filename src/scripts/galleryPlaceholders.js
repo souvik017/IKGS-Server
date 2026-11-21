@@ -12,12 +12,11 @@
  */
 require('dotenv').config();
 
-const fs = require('fs/promises');
-const path = require('path');
 const mongoose = require('mongoose');
 const config = require('../config/env');
 const { connectDB, disconnectDB } = require('../config/db');
 const GalleryImage = require('../models/GalleryImage');
+const { uploadImage } = require('../services/storageService');
 
 /** Varied dimensions so the masonry layout looks realistic. */
 const SPECS = [
@@ -69,32 +68,23 @@ async function createGalleryPlaceholders({ force = false, log = console.log } = 
     return { created: 0, skipped: true };
   }
 
-  const dir = path.join(process.cwd(), config.upload.localDir, 'gallery');
-  await fs.mkdir(dir, { recursive: true });
-
   let created = 0;
   for (let i = 0; i < SPECS.length; i += 1) {
     const spec = SPECS[i];
-    const filename = `placeholder-${String(i + 1).padStart(2, '0')}.svg`;
-    const publicPath = `/uploads/gallery/${filename}`;
-
     // eslint-disable-next-line no-await-in-loop
-    await fs.writeFile(
-      path.join(dir, filename),
-      buildSvg({ index: i + 1, title: spec.title, category: spec.category, w: spec.w, h: spec.h }),
-      'utf8'
-    );
-
-    // eslint-disable-next-line no-await-in-loop
-    const exists = await GalleryImage.findOne({ image: publicPath });
+    const exists = await GalleryImage.findOne({ title: spec.title, caption: /Development placeholder/ });
     if (exists) continue;
+
+    const buffer = Buffer.from(buildSvg({ index: i + 1, title: spec.title, category: spec.category, w: spec.w, h: spec.h }));
+    // eslint-disable-next-line no-await-in-loop
+    const imageUrl = await uploadImage({ buffer }, { folder: 'gallery' });
 
     // eslint-disable-next-line no-await-in-loop
     await GalleryImage.create({
       title: spec.title,
       alt: `Placeholder gallery image ${i + 1}`,
       caption: 'Development placeholder — replace with a real photograph from the admin panel.',
-      image: publicPath,
+      image: imageUrl,
       category: spec.category,
       displayOrder: spec.order,
       published: true,
@@ -102,7 +92,7 @@ async function createGalleryPlaceholders({ force = false, log = console.log } = 
     created += 1;
   }
 
-  log(`+ Created ${created} gallery placeholder image(s) in ${config.upload.localDir}/gallery`);
+  log(`+ Created ${created} Cloudinary-backed gallery placeholder image(s)`);
   return { created, skipped: false };
 }
 

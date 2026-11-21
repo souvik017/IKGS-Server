@@ -6,6 +6,7 @@ const { validate, rules } = require('../middleware/validate');
 
 const router = express.Router();
 router.use(protect);
+router.post('/bulk', authorize('super_admin', 'admin'), controller.bulk);
 
 // `uploadServiceImages` must run before `validate` so that, when the form is
 // submitted as multipart/form-data with an attached image, the text fields are

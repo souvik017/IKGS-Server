@@ -60,6 +60,7 @@ exports.create = asyncHandler(async (req, res) => {
     source: source || 'phone',
     status: STATUSES.includes(status) ? status : 'new',
     service,
+    createdByEmployee: req.employee?._id,
   });
   return sendSuccess(res, { enquiry }, 201);
 });
@@ -148,17 +149,18 @@ exports.matchCustomers = asyncHandler(async (req, res) => {
 // @route   POST /api/enquiries/:id/convert
 // @access  Private
 exports.convert = asyncHandler(async (req, res) => {
-  const { customerId, createBooking = true, booking = {} } = req.body;
+  const { customerId, createCustomer = false, createBooking = true, booking = {} } = req.body;
 
   const enquiry = await Enquiry.findById(req.params.id);
   if (!enquiry) throw ApiError.notFound('Enquiry not found');
 
-  // Resolve or create the customer, reusing existing records where possible.
+  // Customer creation is an explicit choice; enquiries and bookings can remain leads.
   let customer;
-  if (customerId) {
+  if (!createCustomer && customerId) throw ApiError.badRequest('customerId requires createCustomer to be enabled');
+  if (createCustomer && customerId) {
     customer = await Customer.findById(customerId);
     if (!customer) throw ApiError.notFound('Selected customer not found');
-  } else {
+  } else if (createCustomer) {
     const match = await findMatchingCustomer(enquiry);
     if (match) {
       customer = match;
@@ -194,7 +196,7 @@ exports.convert = asyncHandler(async (req, res) => {
       preferredDate: booking.preferredDate ? new Date(booking.preferredDate) : undefined,
       preferredTime: booking.preferredTime,
       message: booking.message || enquiry.details,
-      customer: customer._id,
+      customer: customer?._id,
       enquiry: enquiry._id,
       source: 'admin',
       status: 'new',
@@ -202,9 +204,9 @@ exports.convert = asyncHandler(async (req, res) => {
   }
 
   enquiry.status = 'converted';
-  enquiry.customer = customer._id;
+  if (customer) enquiry.customer = customer._id;
   if (linkedBooking) enquiry.linkedBooking = linkedBooking._id;
-  enquiry.followUps.push({ note: 'Converted to customer', status: 'converted', createdBy: req.admin?._id });
+  enquiry.followUps.push({ note: customer ? 'Converted to booking and customer' : 'Converted to booking; customer record not created', status: 'converted', createdBy: req.admin?._id });
   await enquiry.save();
 
   return sendSuccess(res, { enquiry, customer, booking: linkedBooking });

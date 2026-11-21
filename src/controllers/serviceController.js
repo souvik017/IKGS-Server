@@ -4,6 +4,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { sendSuccess, sendList, parsePagination } = require('../utils/apiResponse');
 const { buildSearch } = require('../utils/query');
 const { uploadImage } = require('../services/storageService');
+const { removeLegacyServicePrices } = require('../services/serviceCatalogService');
 
 const slugify = (title) =>
   String(title)
@@ -46,6 +47,7 @@ async function resolveImage(req) {
 // @route   GET /api/services
 // @access  Private
 exports.list = asyncHandler(async (req, res) => {
+  await removeLegacyServicePrices();
   const { page, limit, skip } = parsePagination(req.query, { displayOrder: 1, createdAt: -1 });
   const query = {};
   if (req.query.active !== undefined && req.query.active !== 'all') {
@@ -64,6 +66,7 @@ exports.list = asyncHandler(async (req, res) => {
 // @route   GET /api/services/:id
 // @access  Private
 exports.getById = asyncHandler(async (req, res) => {
+  await removeLegacyServicePrices();
   const service = await Service.findById(req.params.id);
   if (!service) throw ApiError.notFound('Service not found');
   return sendSuccess(res, { service });
@@ -89,7 +92,6 @@ exports.create = asyncHandler(async (req, res) => {
     description: req.body.description,
     image: image ?? '',
     icon: req.body.icon,
-    startingPrice: toNumber(req.body.startingPrice, 0),
     active: toBool(req.body.active, true),
     featured: toBool(req.body.featured, false),
     displayOrder: toNumber(req.body.displayOrder, 0),
@@ -120,9 +122,7 @@ exports.update = asyncHandler(async (req, res) => {
     if (req.body[field] !== undefined) service[field] = req.body[field];
   });
 
-  if (req.body.startingPrice !== undefined) {
-    service.startingPrice = toNumber(req.body.startingPrice, 0);
-  }
+  await Service.collection.updateOne({ _id: service._id }, { $unset: { startingPrice: 1 } });
   if (req.body.displayOrder !== undefined) {
     service.displayOrder = toNumber(req.body.displayOrder, 0);
   }
@@ -145,6 +145,25 @@ exports.update = asyncHandler(async (req, res) => {
 
   await service.save();
   return sendSuccess(res, { service });
+});
+
+exports.bulk = asyncHandler(async (req, res) => {
+  await removeLegacyServicePrices();
+  const rows = req.body.services;
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 100) throw ApiError.badRequest('Provide between 1 and 100 services in the services array');
+  const normalized = rows.map((row, index) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row) || !String(row.title || '').trim()) throw ApiError.badRequest(`Service at index ${index} needs a title`);
+    const title = String(row.title).trim();
+    const slug = slugify(row.slug || title);
+    if (!slug) throw ApiError.badRequest(`Service at index ${index} has an invalid slug`);
+    return { title, slug, shortDescription: row.shortDescription || '', description: row.description || '', image: row.image || '', icon: row.icon || '', active: toBool(row.active, true), featured: toBool(row.featured, false), displayOrder: toNumber(row.displayOrder, 0), seoTitle: row.seoTitle || title, seoDescription: row.seoDescription || row.shortDescription || '' };
+  });
+  const slugs = normalized.map((s) => s.slug);
+  if (new Set(slugs).size !== slugs.length) throw ApiError.conflict('The JSON contains duplicate service slugs');
+  const conflicts = await Service.find({ slug: { $in: slugs } }).select('slug').lean();
+  if (conflicts.length) throw ApiError.conflict(`These service slugs already exist: ${conflicts.map((s) => s.slug).join(', ')}`);
+  const services = await Service.insertMany(normalized, { ordered: true });
+  return sendSuccess(res, { imported: services.length, services }, 201);
 });
 
 // @desc    Delete a service

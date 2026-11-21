@@ -1,4 +1,6 @@
 const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
 const BRAND = '#2563EB';
 const DARK = '#0D0B1B';
@@ -126,15 +128,16 @@ function drawItemsTable(doc, y, items, currency) {
   return y + 14;
 }
 
-function drawTotals(doc, y, { totals, currency, paymentStatus }) {
-  const x = doc.page.width - 280;
-  const labelWidth = 140;
-  const valueWidth = 90;
+function drawTotals(doc, y, { totals, currency, paymentStatus, roundOff = 0 }) {
+  const x = doc.page.width - 400;
+  const labelWidth = 150;
+  const valueWidth = 200;
   const rows = [
     ['Subtotal', formatCurrency(totals.subtotal, currency)],
     ['Discount', `- ${formatCurrency(totals.discount, currency)}`],
     ['Tax', formatCurrency(totals.tax, currency)],
   ];
+  if (Number(roundOff)) rows.push(['Round Off', formatCurrency(roundOff, currency)]);
 
   doc.font('Helvetica').fontSize(9).fillColor('#374151');
   rows.forEach(([label, value]) => {
@@ -143,7 +146,7 @@ function drawTotals(doc, y, { totals, currency, paymentStatus }) {
     y += 16;
   });
 
-  doc.rect(x - 6, y + 2, labelWidth + valueWidth + 12, 26).fill(BRAND);
+  doc.rect(x - 6, y + 2, labelWidth + valueWidth + 22, 26).fill(BRAND);
   doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(11);
   doc.text('Grand Total', x, y + 9, { width: labelWidth, align: 'right' });
   doc.text(formatCurrency(totals.total, currency), x + labelWidth + 10, y + 9, {
@@ -201,33 +204,142 @@ function renderPdf(build) {
 function generateQuotationPdf(quotation, { settings }) {
   const currency = quotation.currency || 'INR';
   return renderPdf((doc) => {
-    let y = drawHeader(doc, {
-      settings,
-      title: 'QUOTATION',
-      metaLines: [
-        `Quotation No: ${quotation.quotationNumber}`,
-        `Date: ${formatDate(quotation.createdAt)}`,
-        `Valid Until: ${formatDate(quotation.validUntil)}`,
-        `Status: ${quotation.status}`,
-      ],
-    });
+    const width = doc.page.width;
+    const left = 48;
+    const right = width - 48;
+    const usable = right - left;
+    const defaultLogoPath = path.resolve(__dirname, '../../../Frontend/public/images/logo/logo.jpeg');
+    const configuredLogoPath = settings?.logo && !/^https?:\/\//i.test(settings.logo)
+      ? path.resolve(process.cwd(), settings.logo.replace(/^\//, ''))
+      : null;
+    const logoPath = configuredLogoPath && fs.existsSync(configuredLogoPath) ? configuredLogoPath : defaultLogoPath;
+    let y;
+    const pageCount = () => doc.bufferedPageRange().count;
 
-    y = drawPartyBlock(doc, y, { heading: 'BILL TO', customer: quotation.customer });
-    y = Math.max(y, 210);
-    y = drawItemsTable(doc, y, quotation.items, currency);
-    y = drawTotals(doc, y, {
-      totals: {
-        subtotal: quotation.subtotal,
-        discount: quotation.discount,
-        tax: quotation.tax,
-        total: quotation.total,
-      },
-      currency,
+    const header = (first = false) => {
+      if (first) {
+        doc.rect(0, 0, width, 148).fill('#0750B5');
+        doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(25).text(settings?.businessName || 'IKGS SOLUTION', left, 25, { width: 350 });
+        doc.fillColor('#E7F06A').font('Helvetica-Bold').fontSize(10).text(settings?.tagline || 'Ultimate solution for pests and cleanliness', left, 57, { width: 360 });
+        const businessLines = [settings?.address && `Regd. address: ${settings.address}`, settings?.phone && `Phone: ${settings.phone}${settings.altPhone ? ` / ${settings.altPhone}` : ''}`, settings?.email && `Email: ${settings.email}`].filter(Boolean);
+        doc.fillColor('#FFFFFF').font('Helvetica').fontSize(9).text(businessLines.join('\n'), left, 81, { width: 350, lineGap: 2 });
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#FFFFFF');
+        doc.text(settings?.tax?.number ? `GSTIN No: ${settings.tax.number}` : '', 390, 88, { width: 157, align: 'right' });
+        doc.text(`Q No: ${quotation.quotationNumber}`, 405, 106, { width: 142, align: 'right' });
+        doc.text(`DATE: ${formatDate(quotation.createdAt)}`, 405, 124, { width: 142, align: 'right' });
+        if (fs.existsSync(logoPath)) {
+          doc.roundedRect(width - 142, 20, 94, 48, 3).fill('#FFFFFF');
+          doc.image(logoPath, width - 137, 24, { fit: [84, 40], align: 'center', valign: 'center' });
+        }
+        y = 174;
+      } else {
+        doc.addPage();
+        doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(12).text(settings?.businessName || 'IKGS SOLUTION', left, 24);
+        doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(`Technical & Commercial Proposal · ${quotation.quotationNumber}`, left, 42);
+        if (fs.existsSync(logoPath)) doc.image(logoPath, right - 82, 18, { fit: [82, 32], align: 'center', valign: 'center' });
+        doc.moveTo(left, 60).lineTo(right, 60).strokeColor('#D1D5DB').stroke();
+        y = 78;
+      }
+    };
+
+    const ensure = (height) => { if (y + height > doc.page.height - 48) header(false); };
+    const heading = (label) => {
+      ensure(27);
+      doc.fillColor(DARK).font('Helvetica-Bold').fontSize(11).text(label, left, y, { width: usable });
+      y = doc.y + 7;
+    };
+    const paragraph = (value, { bold = false, size = 9, indent = 0, after = 6 } = {}) => {
+      const text = String(value || '').trim();
+      if (!text) return;
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).fillColor('#222222');
+      const h = doc.heightOfString(text, { width: usable - indent, lineGap: 2 });
+      ensure(h + after);
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).fillColor('#222222');
+      doc.text(text, left + indent, y, { width: usable - indent, lineGap: 2 });
+      y = doc.y + after;
+    };
+    const bulletList = (values, fallback) => {
+      (values?.length ? values : fallback).forEach((entry) => paragraph(`•  ${entry}`, { indent: 8, after: 2 }));
+      y += 4;
+    };
+    const customerAddress = quotation.customer?.address
+      ? [quotation.customer.address.street, quotation.customer.address.city, quotation.customer.address.state, quotation.customer.address.zipCode].filter(Boolean).join(', ')
+      : '';
+
+    header(true);
+    paragraph('TECHNICAL & COMMERCIAL PROPOSAL', { bold: true, size: 14, after: 2 });
+    paragraph(quotation.subject || 'For Comprehensive Integrated Pest Management Services', { size: 11, after: 14 });
+    paragraph('Submitted to', { after: 2 });
+    paragraph(quotation.recipientName || quotation.customer?.name, { bold: true, after: 1 });
+    if (quotation.recipientOrganization) paragraph(quotation.recipientOrganization, { bold: true, after: 1 });
+    paragraph(quotation.recipientAddress || customerAddress, { after: 10 });
+    paragraph('Subject', { after: 2 });
+    paragraph(quotation.subject || 'Proposal for Integrated Pest Management (IPM) Services', { after: 9 });
+    paragraph('Dear Sir/Madam,', { after: 7 });
+    paragraph(quotation.introduction || `We are pleased to submit our technical and commercial proposal for ${quotation.subject || 'Integrated Pest Management services'}${quotation.recipientOrganization ? ` at ${quotation.recipientOrganization}` : ''}. IKGS SOLUTION provides professional pest management through planned treatments, routine inspections, preventive measures, and ongoing monitoring.`, { after: 10 });
+
+    heading('Scope of Services');
+    bulletList(quotation.scopeItems, ['Inspection, treatment, monitoring, and preventive pest control.', 'Cockroaches, ants, mosquitoes, flies, spiders, and other common crawling pests.', 'Preventive monitoring and risk assessment.']);
+    header(false);
+    heading('Treatment Areas');
+    bulletList(quotation.treatmentAreas, ['School premises', 'Grounds and public areas', 'Administrative offices', 'Kitchen and canteen', 'Classrooms, laboratories, store rooms, corridors, utility areas, and waste collection points']);
+    heading('Service Methodology');
+    bulletList(quotation.methodology, ['Detailed site inspection before each treatment.', 'Use of approved professional-use products and safe application methods.', 'Preventive recommendations and follow-up response for reported issues.']);
+    if (quotation.serviceFrequency) {
+      heading('Service Frequency');
+      paragraph(quotation.serviceFrequency, { after: 8 });
+    }
+
+    if (y + 220 > doc.page.height - 48) header(false);
+    heading('Commercial Proposal');
+    const drawProposalTableHeader = () => {
+      const tableY = y;
+      doc.rect(left, tableY, usable, 23).fill(LIGHT);
+      doc.fillColor(DARK).font('Helvetica-Bold').fontSize(9);
+      doc.text('Description', left + 6, tableY + 7, { width: usable - 205 });
+      doc.text('Amount', right - 115, tableY + 7, { width: 109, align: 'right' });
+      y += 29;
+    };
+    drawProposalTableHeader();
+    (quotation.items || []).forEach((item, index) => {
+      const description = `${index + 1}. ${item.item}${item.description ? `\n${item.description}` : ''}`;
+      doc.font('Helvetica').fontSize(8).fillColor('#222222');
+      const descH = doc.heightOfString(description, { width: usable - 205 });
+      if (y + Math.max(24, descH + 12) > doc.page.height - 48) {
+        header(false);
+        drawProposalTableHeader();
+      }
+      const rowStart = y;
+      doc.text(description, left + 6, rowStart, { width: usable - 205 });
+      doc.text(formatCurrency(item.lineTotal, currency), right - 115, rowStart, { width: 109, align: 'right' });
+      y += Math.max(24, descH + 10);
+      doc.moveTo(left, y).lineTo(right, y).strokeColor('#D1D5DB').stroke();
+      y += 5;
     });
-    drawFooterText(doc, y, {
-      heading: 'TERMS & CONDITIONS',
-      text: quotation.terms,
-    });
+    doc.font('Helvetica').fontSize(8).fillColor('#222222');
+    paragraph(`${settings?.tax?.label || 'GST'}: Included as applicable.`, { after: 4 });
+    ensure(27);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(DARK).text('Total Quotation Amount', left + 6, y, { width: usable - 130 });
+    doc.text(formatCurrency(quotation.total, currency), right - 115, y, { width: 109, align: 'right' });
+    y += 24;
+
+    if (quotation.terms) {
+      heading('Terms & Conditions');
+      String(quotation.terms).split(/\r?\n/).filter(Boolean).forEach((term, index) => paragraph(/^\s*\d+[.)]/.test(term) ? term.trim() : `${index + 1}. ${term.trim()}`, { size: 8.5, after: 3 }));
+    }
+    if (quotation.notes) {
+      heading('Additional Notes');
+      paragraph(quotation.notes);
+    }
+    if (pageCount() === 2) header(false);
+    heading('Our Commitment');
+    paragraph(quotation.commitment || 'IKGS SOLUTION is committed to delivering reliable, safe, and effective pest management services through professional execution, timely response, and adherence to industry best practices. We appreciate the opportunity to submit this proposal and look forward to serving you.');
+    paragraph(`We sincerely appreciate the opportunity to submit this proposal and look forward to serving ${quotation.recipientOrganization || quotation.recipientName || quotation.customer?.name || 'you'}.`);
+    paragraph('Thank you for your consideration.');
+    paragraph('Yours faithfully,', { after: 10 });
+    paragraph(`For ${settings?.businessName || 'IKGS SOLUTION'}`, { bold: true, after: 3 });
+    paragraph('Authorized Signatory', { after: 5 });
+    paragraph([settings?.phone && `Contact: ${settings.phone}`, settings?.email && `Email: ${settings.email}`, settings?.siteUrl && `Website: ${settings.siteUrl}`].filter(Boolean).join('\n'), { size: 8, after: 0 });
   });
 }
 
@@ -266,6 +378,7 @@ function generateInvoicePdf(invoice, { settings }) {
       },
       currency,
       paymentStatus: invoice.paymentStatus,
+      roundOff: invoice.roundOff,
     });
 
     if (invoice.paymentStatus !== 'paid') {
@@ -277,7 +390,13 @@ function generateInvoicePdf(invoice, { settings }) {
         )}`,
       });
     }
-    drawFooterText(doc, y, { heading: 'TERMS', text: invoice.terms });
+    y = drawFooterText(doc, y, { heading: 'TERMS', text: invoice.terms });
+    if (invoice.dueDate) {
+      drawFooterText(doc, y, {
+        heading: 'BANK DETAILS',
+        text: `Bank: ${settings?.bankName || 'SBI'} · Branch: ${settings?.bankBranch || 'Kalyani'} · Account: ${settings?.bankAccount || '784512523690'} · IFSC: ${settings?.bankIfsc || 'SBIN0012'}`,
+      });
+    }
   });
 }
 

@@ -29,6 +29,9 @@ const inventoryTransactionSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    appointment: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', index: true },
+    appointmentId: { type: String, trim: true },
+    customerName: { type: String, trim: true },
     notes: {
       type: String,
       trim: true,

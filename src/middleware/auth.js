@@ -1,4 +1,5 @@
 const Admin = require('../models/Admin');
+const Employee = require('../models/Employee');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { verifyToken } = require('../utils/jwt');
@@ -41,12 +42,50 @@ const protect = asyncHandler(async (req, res, next) => {
     }
   }
 
+  if (decoded.type === 'employee') throw ApiError.forbidden('Employee accounts cannot access this admin resource');
   const admin = await Admin.findById(decoded.id);
   if (!admin || !admin.active) {
     throw ApiError.unauthorized('Account not found or inactive');
   }
 
   req.admin = admin;
+  next();
+});
+
+const protectEmployee = asyncHandler(async (req, res, next) => {
+  const { token, source } = extractToken(req);
+  if (!token) throw ApiError.unauthorized('Authentication required');
+  let decoded;
+  try { decoded = verifyToken(token); } catch { throw ApiError.unauthorized('Session expired or invalid'); }
+  if (decoded.type !== 'employee') throw ApiError.forbidden('Employee account required');
+  if (source === 'cookie' && !SAFE_METHODS.includes(req.method)) {
+    const csrfCookie=req.cookies?.[config.jwt.csrfCookieName], csrfHeader=req.headers['x-csrf-token'];
+    if(!csrfCookie||!csrfHeader||csrfCookie!==csrfHeader) throw ApiError.forbidden('Invalid CSRF token');
+  }
+  const employee = await Employee.findById(decoded.id);
+  if (!employee || !employee.active) throw ApiError.unauthorized('Employee account not found or inactive');
+  req.employee = employee;
+  next();
+});
+
+const protectAnyAccount = asyncHandler(async (req, res, next) => {
+  const { token, source } = extractToken(req);
+  if (!token) throw ApiError.unauthorized('Authentication required');
+  let decoded;
+  try { decoded = verifyToken(token); } catch { throw ApiError.unauthorized('Session expired or invalid'); }
+  if (source === 'cookie' && !SAFE_METHODS.includes(req.method)) {
+    const csrfCookie=req.cookies?.[config.jwt.csrfCookieName], csrfHeader=req.headers['x-csrf-token'];
+    if(!csrfCookie||!csrfHeader||csrfCookie!==csrfHeader) throw ApiError.forbidden('Invalid CSRF token');
+  }
+  if(decoded.type==='employee') {
+    const employee=await Employee.findById(decoded.id);
+    if(!employee||!employee.active) throw ApiError.unauthorized('Employee account not found or inactive');
+    req.employee=employee;
+  } else {
+    const admin=await Admin.findById(decoded.id);
+    if(!admin||!admin.active) throw ApiError.unauthorized('Account not found or inactive');
+    req.admin=admin;
+  }
   next();
 });
 
@@ -58,4 +97,4 @@ const authorize = (...roles) => (req, res, next) => {
   next();
 };
 
-module.exports = { protect, authorize };
+module.exports = { protect, protectEmployee, protectAnyAccount, authorize };

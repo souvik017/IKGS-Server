@@ -73,6 +73,7 @@ const enquirySchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Appointment',
     },
+    createdByEmployee: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', index: true },
   },
   { timestamps: true }
 );

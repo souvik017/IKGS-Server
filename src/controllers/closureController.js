@@ -5,6 +5,7 @@ const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { sendSuccess, sendList, parsePagination } = require('../utils/apiResponse');
 const { uploadImages } = require('../services/storageService');
+const Invoice = require('../models/Invoice');
 
 // States from which an appointment may be closed.
 const CLOSABLE_STATES = ['scheduled', 'confirmed', 'assigned', 'in-progress'];
@@ -16,15 +17,19 @@ exports.list = asyncHandler(async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query, { completedAt: -1 });
   const query = {};
   if (req.query.appointment) query.appointment = req.query.appointment;
+  if (req.query.status) query.status = req.query.status;
 
   const [closures, total] = await Promise.all([
     AppointmentClosure.find(query)
-      .populate('appointment', 'appointmentId date time status address')
+      .populate({ path: 'appointment', select: 'appointmentId date time status address customer employee service', populate: [{ path: 'customer', select: 'name phone' }, { path: 'employee', select: 'name employeeId' }, { path: 'service', select: 'title' }] })
       .sort({ completedAt: -1 })
       .skip(skip)
       .limit(limit),
     AppointmentClosure.countDocuments(query),
   ]);
+  const invoices = await Invoice.find({ appointment: { $in: closures.map((c) => c.appointment?._id).filter(Boolean) } }).select('invoiceNumber total balanceDue paymentStatus appointment');
+  const byAppointment = new Map(invoices.map((i) => [String(i.appointment), i]));
+  closures.forEach((c) => { c._doc.invoice = byAppointment.get(String(c.appointment?._id)) || null; });
   return sendList(res, closures, { page, limit, total });
 });
 
@@ -44,6 +49,7 @@ exports.getById = asyncHandler(async (req, res) => {
 // @route   POST /api/closures
 // @access  Private
 exports.create = asyncHandler(async (req, res) => {
+  throw ApiError.badRequest('Employees must submit closure requests from their employee portal');
   const { appointment: appointmentId, rating, comments, closingRemarks } = req.body;
   if (!appointmentId) throw ApiError.badRequest('Appointment reference is required');
 
@@ -101,6 +107,30 @@ exports.create = asyncHandler(async (req, res) => {
   }
 
   return sendSuccess(res, { closure, appointment }, 201);
+});
+
+exports.approve = asyncHandler(async(req,res)=>{
+  const closure=await AppointmentClosure.findById(req.params.id);
+  if(!closure) throw ApiError.notFound('Closure request not found');
+  if(closure.status!=='pending-review') throw ApiError.conflict('This closure request is no longer awaiting review');
+  if(!closure.images.length) throw ApiError.badRequest('At least one site photo is required');
+  const invoice=await Invoice.findOne({appointment:closure.appointment});
+  if(!invoice) throw ApiError.badRequest('Create and verify the appointment invoice before final close');
+  const appointment=await Appointment.findById(closure.appointment);
+  if(!appointment) throw ApiError.notFound('Appointment not found');
+  closure.status='approved';closure.reviewedBy=req.admin?._id;closure.reviewedAt=new Date();closure.closedBy=req.admin?._id;await closure.save();
+  appointment.status='completed';if(appointment.booking) await require('../models/Booking').findByIdAndUpdate(appointment.booking,{status:'completed'});await appointment.save();
+  return sendSuccess(res,{closure,appointment,invoice});
+});
+
+exports.reject = asyncHandler(async(req,res)=>{
+  const closure=await AppointmentClosure.findById(req.params.id);
+  if(!closure) throw ApiError.notFound('Closure request not found');
+  if(closure.status!=='pending-review') throw ApiError.conflict('This closure request is no longer awaiting review');
+  const appointment=await Appointment.findById(closure.appointment);
+  closure.status='rejected';closure.reviewedBy=req.admin?._id;closure.reviewedAt=new Date();closure.reviewNotes=String(req.body.reason||'').trim();await closure.save();
+  if(appointment){appointment.status='in-progress';await appointment.save();}
+  return sendSuccess(res,{closure,appointment});
 });
 
 // @desc    Update an existing closure (editing is allowed, duplicates are not)

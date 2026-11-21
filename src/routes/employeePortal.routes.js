@@ -1,0 +1,13 @@
+const express=require('express');
+const controller=require('../controllers/employeePortalController');
+const {protectEmployee}=require('../middleware/auth');
+const {uploadServiceImages}=require('../middleware/upload');
+const router=express.Router();
+router.use(protectEmployee);
+router.get('/dashboard',controller.dashboard);
+router.get('/appointments',controller.appointments);
+router.put('/appointments/:id/status',controller.updateAppointment);
+router.post('/appointments/:id/close-request',uploadServiceImages,controller.requestClose);
+router.get('/enquiries',controller.enquiries);
+router.post('/enquiries',controller.createEnquiry);
+module.exports=router;

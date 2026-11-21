@@ -19,6 +19,7 @@ exports.list = asyncHandler(async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query);
   const query = {};
   if (req.query.status) query.status = req.query.status;
+  if (req.query.source) query.source = req.query.source;
   if (req.query.from || req.query.to) {
     query.preferredDate = {};
     if (req.query.from) query.preferredDate.$gte = new Date(req.query.from);
@@ -35,7 +36,10 @@ exports.list = asyncHandler(async (req, res) => {
       .limit(limit),
     Booking.countDocuments(query),
   ]);
-  return sendList(res, bookings, { page, limit, total });
+  const appointmentLinks = await Appointment.find({ booking: { $in: bookings.map((b) => b._id) } }).select('booking').lean();
+  const linked = new Set(appointmentLinks.map((a) => String(a.booking)));
+  const result = bookings.map((booking) => ({ ...booking.toObject(), hasAppointment: linked.has(String(booking._id)) }));
+  return sendList(res, result, { page, limit, total });
 });
 
 // @desc    Get a booking
@@ -147,12 +151,15 @@ exports.convertToAppointment = asyncHandler(async (req, res) => {
 
   const appointment = await Appointment.create({
     appointmentId: newAppointmentId(),
-    customer: booking.customer,
+    customer: booking.customer || undefined,
+    clientName: booking.name,
+    clientPhone: booking.phone,
+    clientEmail: booking.email,
     booking: booking._id,
     service: booking.service,
     date: new Date(date),
     time: time || booking.preferredTime,
-    address: booking.address,
+    address: req.body.address || booking.address,
     employee: employee || undefined,
     jobNotes,
     status: employee ? 'assigned' : 'scheduled',

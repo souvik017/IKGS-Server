@@ -32,11 +32,6 @@ const serviceSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    startingPrice: {
-      type: Number,
-      default: 0,
-      min: [0, 'Starting price cannot be negative'],
-    },
     active: {
       type: Boolean,
       default: true,

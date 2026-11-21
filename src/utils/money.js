@@ -27,6 +27,8 @@ function calculateLine(line) {
   return {
     item: line.item,
     description: line.description,
+    hsnSac: line.hsnSac || '998512',
+    unit: line.unit || 'NOS',
     quantity,
     unitPrice: toRupees(unitPrice),
     discount: toRupees(discount),
@@ -61,7 +63,9 @@ function calculateTotals(items = [], { documentDiscount = 0, taxRate = 0, taxEna
 
   const documentTaxPaise = taxEnabled ? Math.round((taxablePaise * (Number(taxRate) || 0)) / 100) : 0;
   const totalTaxPaise = lineTaxTotalPaise + documentTaxPaise;
-  const totalPaise = taxablePaise + totalTaxPaise;
+  const unroundedTotalPaise = taxablePaise + totalTaxPaise;
+  const totalPaise = Math.floor(unroundedTotalPaise / 100) * 100;
+  const roundOffPaise = totalPaise - unroundedTotalPaise;
 
   return {
     items: lines.map(({ _paise, ...rest }) => rest),
@@ -70,6 +74,7 @@ function calculateTotals(items = [], { documentDiscount = 0, taxRate = 0, taxEna
     discount: toRupees(discountPaise),
     taxRate: taxEnabled ? Number(taxRate) || 0 : 0,
     tax: toRupees(totalTaxPaise),
+    roundOff: toRupees(roundOffPaise),
     total: toRupees(totalPaise),
   };
 }

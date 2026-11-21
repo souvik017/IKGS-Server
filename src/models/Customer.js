@@ -41,6 +41,7 @@ const customerSchema = new mongoose.Schema(
         'Please enter a valid email',
       ],
     },
+    gstin: { type: String, trim: true, uppercase: true, maxlength: [15, 'GSTIN cannot exceed 15 characters'] },
     address: {
       type: addressSchema,
       default: () => ({}),

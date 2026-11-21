@@ -20,5 +20,6 @@ router
 router.route('/:id').get(controller.getById).put(controller.update).delete(controller.remove);
 router.put('/:id/status', controller.updateStatus);
 router.put('/:id/assign', controller.assign);
+router.post('/:id/materials', controller.assignMaterial);
 
 module.exports = router;

@@ -11,8 +11,10 @@ const appointmentSchema = new mongoose.Schema(
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Customer',
-      required: [true, 'Appointment must reference a customer'],
     },
+    clientName: { type: String, trim: true, maxlength: 120 },
+    clientPhone: { type: String, trim: true },
+    clientEmail: { type: String, trim: true, lowercase: true },
     booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Booking',
@@ -43,6 +45,14 @@ const appointmentSchema = new mongoose.Schema(
       trim: true,
       maxlength: [2000, 'Job notes cannot exceed 2000 characters'],
     },
+    materials: [{
+      item: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', required: true },
+      itemName: { type: String, required: true, trim: true },
+      quantity: { type: Number, required: true, min: 0 },
+      unit: { type: String, trim: true },
+      assignedAt: { type: Date, default: Date.now },
+      assignedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    }],
     status: {
       type: String,
       enum: [
@@ -50,6 +60,7 @@ const appointmentSchema = new mongoose.Schema(
         'confirmed',
         'assigned',
         'in-progress',
+        'completion-requested',
         'completed',
         'cancelled',
         'rescheduled',

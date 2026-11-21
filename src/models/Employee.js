@@ -28,10 +28,16 @@ const employeeSchema = new mongoose.Schema(
         'Please enter a valid email',
       ],
     },
+    passwordHash: { type: String, select: false },
+    passwordResetTokenHash: { type: String, select: false },
+    passwordResetExpires: { type: Date, select: false },
     designation: {
       type: String,
       trim: true,
     },
+    dateOfBirth: { type: Date },
+    address: { type: String, trim: true, maxlength: 500 },
+    aadhaarEncrypted: { type: String, select: false },
     profileImage: {
       type: String,
       default: '',
